@@ -15,7 +15,7 @@ st.set_page_config(page_title="교회 매칭 프로그램 (팀 번호 + 이름�
 st.markdown("""
 <style>
 .team-title {text-align:center; font-size: 42px; font-weight: 800; margin: 24px 0 8px 0;}
-.names-line {text-align:center; font-size: 22px; line-height: 1.8;}
+.names-line {text-align:center; font-size: 30px; line-height: 1.8;}
 .navbar {display:flex; gap:12px; justify-content:center; align-items:center; margin: 12px 0 24px 0;}
 .badge {font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid #ddd;}
 </style>
