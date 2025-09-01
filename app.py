@@ -8,7 +8,18 @@ import numpy as np
 import streamlit as st
 from ortools.sat.python import cp_model
 
+# ------------------------------
+# Page setup + minimal CSS
+# ------------------------------
 st.set_page_config(page_title="교회 매칭 프로그램 (팀 번호 + 이름만)", layout="wide")
+st.markdown("""
+<style>
+.team-title {text-align:center; font-size: 42px; font-weight: 800; margin: 24px 0 8px 0;}
+.names-line {text-align:center; font-size: 22px; line-height: 1.8;}
+.navbar {display:flex; gap:12px; justify-content:center; align-items:center; margin: 12px 0 24px 0;}
+.badge {font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid #ddd;}
+</style>
+""", unsafe_allow_html=True)
 
 # ------------------------------
 # 가나다순 정렬 키
@@ -88,13 +99,9 @@ def choose_group_sizes(N: int, max_offsize: int = 4):
         return sizes, None
 
 def allowed_male_bounds(size):
-    # 7인: 남 3~4 / 6인: 남 2~4 / 8인: 남 3~5
-    if size == 7:
-        return 3,4
-    if size == 6:
-        return 2,4
-    if size == 8:
-        return 3,5
+    if size == 7: return 3,4
+    if size == 6: return 2,4
+    if size == 8: return 3,5
     lo = int(math.floor(0.4*size))
     hi = int(math.ceil(0.6*size))
     return lo, hi
@@ -236,13 +243,9 @@ with st.sidebar:
     st.header("설정")
     uploaded = st.file_uploader("엑셀 업로드 (.xlsx)", type=["xlsx"])
     time_limit = st.slider("해결 시간 제한(초)", min_value=5, max_value=30, value=10, step=1)
-    run_btn = st.button("🎲 추첨 시작")
+    run_btn = st.button("🎲 매칭 시작")
 
-st.markdown("""
-**입력 컬럼(필수)**: `이름`, `성별(남/여)`, `교회 이름`, `나이`  
-- `나이대`는 자동 생성됩니다. (10/20/30/40/50/60+)
-- 결과 표시/다운로드에는 **팀 번호와 이름만** 포함됩니다(이름은 팀별 가나다순).
-""")
+st.markdown("필수 컬럼: `이름`, `성별(남/여)`, `교회 이름`, `나이` &nbsp;&nbsp;·&nbsp;&nbsp; 결과는 **팀 번호 + 이름(가나다순, `/` 구분)** 만 표시됩니다.", unsafe_allow_html=True)
 
 df = None
 if uploaded is not None:
@@ -270,9 +273,6 @@ if df is not None:
         st.dataframe(df[df["나이대"].isna()])
         st.stop()
 
-    st.subheader("입력 데이터 미리보기")
-    st.dataframe(df.head(10))
-
     N = len(df)
     sizes, warn = choose_group_sizes(N, max_offsize=4)
     if sizes is None:
@@ -283,10 +283,11 @@ if df is not None:
         st.warning(warn)
 
     if run_btn:
+        # 진행 애니메이션
         ph = st.empty()
         for pct in range(0, 101, 7):
-            ph.progress(pct, text="무작위 배치 탐색 중...")
-            time.sleep(0.05)
+            ph.progress(pct, text="배치 탐색 중...")
+            time.sleep(0.03)
 
         groups, warn_list, err, sizes = solve_assignment(df, time_limit=time_limit)
 
@@ -297,35 +298,55 @@ if df is not None:
             for w in warn_list:
                 st.warning(w)
 
-        st.success("배치 완료! 아래에서 팀을 확인하세요.")
         people = df.to_dict('records')
 
-        # --- 화면 표시: 팀 번호 + 이름(가나다순, 세로 목록) ---
-        st.subheader("팀 구성 (팀 번호 + 이름, 가나다순)")
-        cols = st.columns(3)
-        for idx, (g, members) in enumerate(enumerate(groups)):
-            col = cols[idx % 3]
-            team_members = [people[i] for i in members]
-            with col:
-                st.markdown(f"### 팀 {g+1}")
-                names = [p['이름'] for p in team_members]
-                names_sorted = sorted(names, key=hangul_key)
-                st.markdown("\\n".join(f"- {name}" for name in names_sorted))
-
-        # --- 다운로드: 팀 번호 + 이름 (팀별 가나다순) ---
-        rows = []
+        # Prepare names per team (ga-na-da order, " / " join)
+        names_per_team = []
         for g, members in enumerate(groups):
             team_names = [people[i]['이름'] for i in members]
-            for name in sorted(team_names, key=hangul_key):
-                rows.append({"팀": g+1, "이름": name})
-        out_df = pd.DataFrame(rows)
+            team_names_sorted = sorted(team_names, key=hangul_key)
+            names_per_team.append(" / ".join(team_names_sorted))
 
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-            out_df.to_excel(writer, index=False, sheet_name="TeamsOnly")
-        st.download_button("결과 엑셀 다운로드(팀+이름, 가나다순)", data=buf.getvalue(),
-                           file_name="teams_names_only.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # Initialize session state
+        st.session_state.assignment_ready = True
+        st.session_state.names_per_team = names_per_team
+        st.session_state.team_count = len(names_per_team)
+        st.session_state.team_idx = 0
 
+# Sequential viewer (only if ready)
+if st.session_state.get("assignment_ready", False):
+    ctop = st.container()
+    with ctop:
+        st.markdown("<div class='navbar'>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            if st.button("◀ 이전 팀"):
+                st.session_state.team_idx = (st.session_state.team_idx - 1) % st.session_state.team_count
+        with c2:
+            st.markdown(f"<span class='badge'>{st.session_state.team_idx+1} / {st.session_state.team_count}팀</span>", unsafe_allow_html=True)
+        with c3:
+            if st.button("다음 팀 ▶"):
+                st.session_state.team_idx = (st.session_state.team_idx + 1) % st.session_state.team_count
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    cur_idx = st.session_state.team_idx
+    team_number = cur_idx + 1
+    names_line = st.session_state.names_per_team[cur_idx]
+
+    st.markdown(f"<div class='team-title'>팀 {team_number}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='names-line'>{names_line}</div>", unsafe_allow_html=True)
+
+    # Download button (full assignment)
+    rows = []
+    for g, names_line_tmp in enumerate(st.session_state.names_per_team):
+        for name in names_line_tmp.split(" / "):
+            rows.append({"팀": g+1, "이름": name})
+    out_df = pd.DataFrame(rows)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        out_df.to_excel(writer, index=False, sheet_name="TeamsOnly")
+    st.download_button("결과 엑셀 다운로드(팀+이름, 가나다순)", data=buf.getvalue(),
+                       file_name="teams_names_only.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
-    st.info("왼쪽 사이드바에서 엑셀 파일을 업로드하시고 '🎲 추첨 시작'을 눌러주세요.")
+    st.info("엑셀 업로드 후 '🎲 매칭 시작'을 눌러주세요.")
