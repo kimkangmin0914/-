@@ -178,7 +178,7 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
         sL.append(sl)
         sU.append(su)
 
-    
+
     # 교회: 팀당 최대 max_per_church(하드)
     # 기본 목표는 팀당 <=2, 불가피한 경우에만 3·4 허용(정확히 필요한 만큼만)
     church_is3_flags = []  # cnt==3
@@ -222,20 +222,20 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     age_pair_flags = []
 
     age_is3_flags = []
-for b in bands:
-    y_vars = []
-    members = band_members[b]
-    for g in range(G):
-        cnt = model.NewIntVar(0, min(3, len(members)), f"band_{b}_{g}")
-        model.Add(cnt == sum(x[(i,g)] for i in members))
-        model.Add(cnt <= 3)
-        is3 = model.NewBoolVar(f"is3_band_{b}_{g}")
-        model.Add(cnt == 3).OnlyEnforceIf(is3)
-        model.Add(cnt != 3).OnlyEnforceIf(is3.Not())
-        age_is3_flags.append(is3)
-        y_vars.append(is3)
-    # 필요한 3인 팀 개수만큼 정확히 배치
-    model.Add(sum(y_vars) == int(age_extra_needed[b]))
+    for b in bands:
+        y_vars = []
+        members = band_members[b]
+        for g in range(G):
+            cnt = model.NewIntVar(0, min(3, len(members)), f"band_{b}_{g}")
+            model.Add(cnt == sum(x[(i,g)] for i in members))
+            model.Add(cnt <= 3)
+            is3 = model.NewBoolVar(f"is3_band_{b}_{g}")
+            model.Add(cnt == 3).OnlyEnforceIf(is3)
+            model.Add(cnt != 3).OnlyEnforceIf(is3.Not())
+            age_is3_flags.append(is3)
+            y_vars.append(is3)
+        # 필요한 3인 팀 개수만큼 정확히 배치
+        model.Add(sum(y_vars) == int(age_extra_needed[b]))
 
     # 목적함수
     rand = random.Random(int(time.time()) % (10**6))
@@ -344,7 +344,7 @@ if df is not None:
         age_counts = df["나이대"].value_counts().rename_axis("나이대").reset_index(name="인원").sort_values("나이대")
         age_counts["초과필요(3인팀수)"] = (age_counts["인원"] - 2*G).clip(lower=0)
         st.dataframe(age_counts)
-    
+
     if run_btn:
         ph = st.empty()
         for pct in range(0, 101, 7):
