@@ -41,7 +41,7 @@ def hangul_key(s: str):
 # ------------------------------
 # 유틸: 데이터 전처리
 # ------------------------------
-AGE_BANDS = ["10대","20대","30대","40대","50대","60대+"]
+AGE_BANDS = ["10대","20대","30대","40대","50대","60대","70대"]
 
 def age_to_band(age: int) -> str:
     try:
@@ -58,7 +58,9 @@ def age_to_band(age: int) -> str:
         return "40대"
     if a < 60:
         return "50대"
-    return "60대+"
+    if a < 70:
+        return "60대"
+    return "70대"
 
 def normalize_gender(x):
     if pd.isna(x):
