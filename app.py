@@ -12,12 +12,62 @@ from ortools.sat.python import cp_model
 # Page setup + CSS
 # ------------------------------
 st.set_page_config(page_title="교회 매칭 프로그램 (팀 번호 + 이름만)", layout="wide")
-st.markdown("""
+st.markdown(f"""
 <style>
-.team-title {text-align:center; font-size: 64px; font-weight: 800; margin: 24px 0 8px 0;}
-.names-line {text-align:center; font-size: 36px; line-height: 1.8;}
-.navbar {display:flex; gap:12px; justify-content:center; align-items:center; margin: 12px 0 24px 0;}
-.badge {font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid #ddd;}
+:root {{
+  --brand:#2e5a88; --brand-2:#3a7ca5; --bg1:#f5f8fc; --bg2:#eaf2fb; --text:#1b365d; --muted:#7a8ca3;
+}}
+html, body, [data-testid="stAppViewContainer"] {{
+  background: linear-gradient(180deg, var(--bg1), var(--bg2));
+  color: var(--text);
+}}
+/* Container width & spacing */
+.block-container {{
+  padding-top: 1rem;
+  padding-bottom: 2rem;
+  max-width: 1100px;
+}}
+/* Header */
+.app-header {{
+  text-align:center; margin: 6px 0 10px 0;
+}}
+.app-header h1 {{
+  font-weight: 800; letter-spacing: 0.3px; margin: 0; color: var(--brand);
+}}
+.app-sub {{
+  text-align:center; color: var(--muted); margin-bottom: 18px;
+}}
+/* Cards */
+.card, .big-card, .team-card {{
+  background: rgba(255,255,255,0.72);
+  border: 1px solid rgba(46,90,136,0.08);
+  border-radius: 18px;
+  box-shadow: 0 10px 24px rgba(46,90,136,0.10);
+  padding: 18px 22px;
+  backdrop-filter: blur(6px);
+}}
+.big-card {{ padding: 26px 28px; }}
+.team-card-title {{
+  font-weight: 700; color: var(--brand); margin-bottom: 6px; text-align:center;
+}}
+.team-card-names {{ text-align:center; color: var(--text); }}
+/* Titles & Names (sizes overridden by sliders below) */
+.team-title {{ text-align:center; font-size: {title_px if 'title_px' in globals() else 64}px; font-weight: 800; margin: 10px 0 8px 0; color: var(--brand); }}
+.names-line {{ text-align:center; font-size: {names_px if 'names_px' in globals() else 36}px; line-height: 1.9; color: var(--text); }}
+/* Toolbar & badges */
+.navbar {{ display:flex; gap:12px; justify-content:center; align-items:center; margin: 12px 0 16px 0; }}
+.badge {{ font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid rgba(46,90,136,0.25); background:#fff; }}
+/* Streamlit buttons */
+.stButton>button, .stDownloadButton>button {{
+  border-radius: 12px; padding: 0.45rem 0.9rem; border: 1px solid rgba(46,90,136,0.22);
+  background: linear-gradient(180deg, #ffffff, #f2f6fb);
+  color: var(--text); font-weight: 600;
+}}
+.stButton>button:hover, .stDownloadButton>button:hover {{
+  border-color: var(--brand-2); box-shadow: 0 6px 16px rgba(58,124,165,0.18);
+}}
+/* Sidebar tweaks */
+[data-testid="stSidebar"] .block-container {{ padding-top: 0.6rem; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -276,7 +326,8 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
 # ------------------------------
 # UI
 # ------------------------------
-st.title("교회 매칭 프로그램 (팀 번호 + 이름만)")
+st.markdown('<div class="app-header"><h1>교회 매칭 프로그램</h1></div>', unsafe_allow_html=True)
+st.markdown('<div class="app-sub">팀 번호 + 이름(가나다순, “/” 구분) • 균형 매칭</div>', unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("설정")
