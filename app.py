@@ -128,6 +128,10 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     bands = AGE_BANDS
     band_members = {b: [i for i,p in enumerate(people) if p['나이대'] == b] for b in bands}
 
+    # 나이대 초과분 계산(기본 2/팀, 불가피 시 3 허용)
+    age_counts = {b: len(members) for b, members in band_members.items()}
+    age_extra_needed = {b: max(0, cnt - 2*G) for b, cnt in age_counts.items()}
+
     # 사전 타당성: 교회/나이대 인원수가 max_per_church*G 초과면 불가능
     overload = []
     for c, members in church_members.items():
@@ -138,9 +142,9 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
               "\n".join([f" - {c}: {cnt}명 > 허용 {cap}명" for c,cnt,cap in overload])
         return None, None, msg, None
     for b, members in band_members.items():
-        if len(members) > 2*G:  # 나이대는 기존 2명 유지
+        if len(members) > 3*G:  # 나이대는 기존 2명 유지
             msg = "불가능: 일부 나이대 인원이 너무 많아(최대 2명/팀) 배치가 불가합니다.\n" + \
-                  "\n".join([f" - {b}: {len(band_members[b])}명 > 허용 {2*G}명"])
+                  "\n".join([f" - {b}: {len(band_members[b])}명 > 허용 {3*G}명"])
             return None, None, msg, None
 
     model = cp_model.CpModel()
