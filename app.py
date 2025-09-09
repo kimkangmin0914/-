@@ -4,7 +4,6 @@ import io
 import math
 import random
 import pandas as pd
-import numpy as np
 import streamlit as st
 from ortools.sat.python import cp_model
 
@@ -98,7 +97,7 @@ def choose_group_sizes(N: int, max_offsize: int = 4):
         sizes = [6]*x6 + [7]*x7 + [8]*x8
         return sizes, None
 
-def allowed_male_bounds(size):(size):
+def allowed_male_bounds(size):
     if size == 7: return 3,4
     if size == 6: return 2,4
     if size == 8: return 3,5
@@ -135,7 +134,7 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
         if len(members) > max_per_church*G:
             overload.append((c, len(members), max_per_church*G))
     if overload:
-        msg = "불가능: 일부 교회 인원이 너무 많아(최대 {max_per_church}명/팀) 배치가 불가합니다.\n" + \
+        msg = f"불가능: 일부 교회 인원이 너무 많아(최대 {max_per_church}명/팀) 배치가 불가합니다.\n" + \
               "\n".join([f" - {c}: {cnt}명 > 허용 {cap}명" for c,cnt,cap in overload])
         return None, None, msg, None
     for b, members in band_members.items():
@@ -178,10 +177,6 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     # 기본 목표는 팀당 <=2, 불가피한 경우에만 3·4 허용(정확히 필요한 만큼만)
     church_is3_flags = []  # cnt==3
     church_is4_flags = []  # cnt==4
-    church_extras_sum = [] # z = is3 + 2*is4 (팀별 초과합)
-    for g in range(G):
-        pass  # placeholder to keep loop variable available
-
     # Per-church per-team variables
     church_cnt = {}  # (c,g) -> IntVar
     church_z = {}    # (c,g) -> IntVar in [0,2]
@@ -248,6 +243,10 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = float(time_limit)
     solver.parameters.num_search_workers = 8
+    try:
+        solver.parameters.random_seed = int(seed)
+    except Exception:
+        pass
 
     res = solver.Solve(model)
     if res not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
