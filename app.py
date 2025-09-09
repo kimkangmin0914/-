@@ -42,7 +42,7 @@ def hangul_key(s: str):
 # ------------------------------
 # 유틸: 데이터 전처리
 # ------------------------------
-AGE_BANDS = ["10대","20대","30대","40대","50대","60대+"]
+AGE_BANDS = ["10대","20대","30대","40대","50대","60대","70대"]
 
 def age_to_band(age: int) -> str:
     try:
@@ -59,7 +59,9 @@ def age_to_band(age: int) -> str:
         return "40대"
     if a < 60:
         return "50대"
-    return "60대+"
+    if a < 70:
+        return "60대"
+    return "70대"
 
 def normalize_gender(x):
     if pd.isna(x):
@@ -128,6 +130,9 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
 
     bands = AGE_BANDS
     band_members = {b: [i for i,p in enumerate(people) if p['나이대'] == b] for b in bands}
+    # 나이대 초과: 기본 2/팀, 불가 시 3/팀 허용 - 필요한 3인팀 수 계산
+    age_counts = {b: len(members) for b, members in band_members.items()}
+    age_extra_needed = {b: max(0, cnt - 2*G) for b, cnt in age_counts.items()}
 
     # 사전 타당성: 교회/나이대 인원수가 max_per_church*G 초과면 불가능
     overload = []
@@ -139,9 +144,9 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
               "\n".join([f" - {c}: {cnt}명 > 허용 {cap}명" for c,cnt,cap in overload])
         return None, None, msg, None
     for b, members in band_members.items():
-        if len(members) > 2*G:  # 나이대는 기존 2명 유지
-            msg = "불가능: 일부 나이대 인원이 너무 많아(최대 2명/팀) 배치가 불가합니다.\n" + \
-                  "\n".join([f" - {b}: {len(band_members[b])}명 > 허용 {2*G}명"])
+        if len(members) > 3*G:  # 나이대는 기본 2명, 불가 시 3명 허용
+            msg = "불가능: 일부 나이대 인원이 너무 많아(최대 3명/팀(기본 2명, 불가 시 3명)) 배치가 불가합니다.\n" + \
+                  "\n".join([f" - {b}: {len(band_members[b])}명 > 허용 {3*G}명"])
             return None, None, msg, None
 
     model = cp_model.CpModel()
@@ -216,18 +221,21 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
 
     age_pair_flags = []
 
+    age_is3_flags = []
+for b in bands:
+    y_vars = []
+    members = band_members[b]
     for g in range(G):
-        for b in bands:
-            members = band_members[b]
-            if not members:
-                continue
-            cnt = model.NewIntVar(0, min(2, len(members)), f"band_{b}_{g}")
-            model.Add(cnt == sum(x[(i,g)] for i in members))
-            model.Add(cnt <= 2)
-            is_pair = model.NewBoolVar(f"is_band_pair_{b}_{g}")
-            model.Add(cnt == 2).OnlyEnforceIf(is_pair)
-            model.Add(cnt != 2).OnlyEnforceIf(is_pair.Not())
-            age_pair_flags.append(is_pair)
+        cnt = model.NewIntVar(0, min(3, len(members)), f"band_{b}_{g}")
+        model.Add(cnt == sum(x[(i,g)] for i in members))
+        model.Add(cnt <= 3)
+        is3 = model.NewBoolVar(f"is3_band_{b}_{g}")
+        model.Add(cnt == 3).OnlyEnforceIf(is3)
+        model.Add(cnt != 3).OnlyEnforceIf(is3.Not())
+        age_is3_flags.append(is3)
+        y_vars.append(is3)
+    # 필요한 3인 팀 개수만큼 정확히 배치
+    model.Add(sum(y_vars) == int(age_extra_needed[b]))
 
     # 목적함수
     rand = random.Random(int(time.time()) % (10**6))
@@ -241,7 +249,7 @@ def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     model.Minimize(
         1000 * sum(sL) + 1000 * sum(sU) +
         5 * sum(church_is4_flags) + 2 * sum(church_is3_flags) +
-        2 * sum(age_pair_flags) +
+        1 * sum(age_is3_flags) +
         1 * sum(noise_terms)
     )
 
