@@ -92,13 +92,13 @@ def choose_group_sizes(N: int, max_offsize: int = 4):
             if best is None or cand < best:
                 best = cand
     if best is None:
-        return None
+        return None, f"해결 실패: 6/7/8인 조의 조합으로 총원 {N}명을 구성할 수 없습니다."
     else:
         (_, x6, x7, x8) = best
         sizes = [6]*x6 + [7]*x7 + [8]*x8
-        return sizes
+        return sizes, None
 
-def allowed_male_bounds(size):
+def allowed_male_bounds(size):(size):
     if size == 7: return 3,4
     if size == 6: return 2,4
     if size == 8: return 3,5
