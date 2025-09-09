@@ -9,13 +9,13 @@ import streamlit as st
 from ortools.sat.python import cp_model
 
 # ------------------------------
-# Page setup + minimal CSS
+# Page setup + CSS
 # ------------------------------
 st.set_page_config(page_title="교회 매칭 프로그램 (팀 번호 + 이름만)", layout="wide")
 st.markdown("""
 <style>
-.team-title {text-align:center; font-size: 42px; font-weight: 800; margin: 24px 0 8px 0;}
-.names-line {text-align:center; font-size: 30px; line-height: 1.8;}
+.team-title {text-align:center; font-size: 64px; font-weight: 800; margin: 24px 0 8px 0;}
+.names-line {text-align:center; font-size: 36px; line-height: 1.8;}
 .navbar {display:flex; gap:12px; justify-content:center; align-items:center; margin: 12px 0 24px 0;}
 .badge {font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid #ddd;}
 </style>
@@ -92,11 +92,11 @@ def choose_group_sizes(N: int, max_offsize: int = 4):
             if best is None or cand < best:
                 best = cand
     if best is None:
-        return None, "해결 실패: 6/7/8인 조의 조합으로 총원 {}명을 구성할 수 없습니다.".format(N)
+        return None
     else:
         (_, x6, x7, x8) = best
         sizes = [6]*x6 + [7]*x7 + [8]*x8
-        return sizes, None
+        return sizes
 
 def allowed_male_bounds(size):
     if size == 7: return 3,4
@@ -109,7 +109,7 @@ def allowed_male_bounds(size):
 # ------------------------------
 # OR-Tools CP-SAT 모델
 # ------------------------------
-def solve_assignment(df, seed=0, time_limit=10):
+def solve_assignment(df, seed=0, time_limit=10, max_per_church=4):
     people = df.to_dict('records')
     N = len(people)
     sizes, warn = choose_group_sizes(N, max_offsize=4)
@@ -121,20 +121,25 @@ def solve_assignment(df, seed=0, time_limit=10):
 
     churches = sorted(df['교회 이름'].fillna("미상").astype(str).unique().tolist())
     church_members = {c: [i for i,p in enumerate(people) if str(p['교회 이름']) == c] for c in churches}
+
+    church_counts = {c: len(members) for c, members in church_members.items()}
+    # 각 교회는 2명/팀을 기본 목표로 하고, 초과 인원은 반드시 배치해야 하는 'extra'로 계산
+    extra_needed = {c: max(0, cnt - 2*G) for c, cnt in church_counts.items()}
+
     bands = AGE_BANDS
     band_members = {b: [i for i,p in enumerate(people) if p['나이대'] == b] for b in bands}
 
-    # 사전 타당성: 교회/나이대 인원수가 2*G 초과면 불가능
+    # 사전 타당성: 교회/나이대 인원수가 max_per_church*G 초과면 불가능
     overload = []
     for c, members in church_members.items():
-        if len(members) > 2*G:
-            overload.append((c, len(members), 2*G))
+        if len(members) > max_per_church*G:
+            overload.append((c, len(members), max_per_church*G))
     if overload:
-        msg = "불가능: 일부 교회 인원이 너무 많아(최대 2명/팀) 배치가 불가합니다.\n" + \
+        msg = "불가능: 일부 교회 인원이 너무 많아(최대 {max_per_church}명/팀) 배치가 불가합니다.\n" + \
               "\n".join([f" - {c}: {cnt}명 > 허용 {cap}명" for c,cnt,cap in overload])
         return None, None, msg, None
     for b, members in band_members.items():
-        if len(members) > 2*G:
+        if len(members) > 2*G:  # 나이대는 기존 2명 유지
             msg = "불가능: 일부 나이대 인원이 너무 많아(최대 2명/팀) 배치가 불가합니다.\n" + \
                   "\n".join([f" - {b}: {len(band_members[b])}명 > 허용 {2*G}명"])
             return None, None, msg, None
@@ -168,22 +173,49 @@ def solve_assignment(df, seed=0, time_limit=10):
         sL.append(sl)
         sU.append(su)
 
-    # 교회/나이대: 팀당 최대 2명(하드) + 2명일 때 패널티
-    church_pair_flags = []
+    
+    # 교회: 팀당 최대 max_per_church(하드)
+    # 기본 목표는 팀당 <=2, 불가피한 경우에만 3·4 허용(정확히 필요한 만큼만)
+    church_is3_flags = []  # cnt==3
+    church_is4_flags = []  # cnt==4
+    church_extras_sum = [] # z = is3 + 2*is4 (팀별 초과합)
     for g in range(G):
-        for c in churches:
+        pass  # placeholder to keep loop variable available
+
+    # Per-church per-team variables
+    church_cnt = {}  # (c,g) -> IntVar
+    church_z = {}    # (c,g) -> IntVar in [0,2]
+    for c in churches:
+        z_vars = []
+        for g in range(G):
             members = church_members[c]
-            if not members:
-                continue
-            cnt = model.NewIntVar(0, min(2, len(members)), f"church_{c}_{g}")
+            cnt = model.NewIntVar(0, min(max_per_church, len(members)), f"church_{c}_{g}")
             model.Add(cnt == sum(x[(i,g)] for i in members))
-            model.Add(cnt <= 2)
-            is_pair = model.NewBoolVar(f"is_pair_{c}_{g}")
-            model.Add(cnt == 2).OnlyEnforceIf(is_pair)
-            model.Add(cnt != 2).OnlyEnforceIf(is_pair.Not())
-            church_pair_flags.append(is_pair)
+            model.Add(cnt <= max_per_church)
+            church_cnt[(c,g)] = cnt
+
+            # is3 / is4 booleans
+            is3 = model.NewBoolVar(f"is3_{c}_{g}")
+            is4 = model.NewBoolVar(f"is4_{c}_{g}")
+            model.Add(cnt == 3).OnlyEnforceIf(is3)
+            model.Add(cnt != 3).OnlyEnforceIf(is3.Not())
+            model.Add(cnt == 4).OnlyEnforceIf(is4)
+            model.Add(cnt != 4).OnlyEnforceIf(is4.Not())
+            church_is3_flags.append(is3)
+            church_is4_flags.append(is4)
+
+            # z extras: 0 if cnt<=2, 1 if cnt==3, 2 if cnt==4
+            z = model.NewIntVar(0, 2, f"z_extra_{c}_{g}")
+            model.Add(z == is3 + 2*is4)
+            church_z[(c,g)] = z
+            z_vars.append(z)
+
+        # 필요한 초과 인원 합을 정확히 맞춤(= 불가피한 경우에만 3/4 허용)
+        need = extra_needed[c]
+        model.Add(sum(z_vars) == need)
 
     age_pair_flags = []
+
     for g in range(G):
         for b in bands:
             members = band_members[b]
@@ -197,7 +229,7 @@ def solve_assignment(df, seed=0, time_limit=10):
             model.Add(cnt != 2).OnlyEnforceIf(is_pair.Not())
             age_pair_flags.append(is_pair)
 
-    # 목적함수: 성비 슬랙 최소 + 동일 교회/나이대 '2명' 최소 + 약한 무작위성
+    # 목적함수
     rand = random.Random(int(time.time()) % (10**6))
     noise_terms = []
     for i in range(N):
@@ -208,7 +240,7 @@ def solve_assignment(df, seed=0, time_limit=10):
 
     model.Minimize(
         1000 * sum(sL) + 1000 * sum(sU) +
-        3 * sum(church_pair_flags) +
+        5 * sum(church_is4_flags) + 2 * sum(church_is3_flags) +
         2 * sum(age_pair_flags) +
         1 * sum(noise_terms)
     )
@@ -226,7 +258,6 @@ def solve_assignment(df, seed=0, time_limit=10):
         members = [i for i in range(N) if solver.Value(x[(i,g)]) == 1]
         groups.append(members)
 
-    # 성비 완화 경고
     total_slack = int(sum(solver.Value(v) for v in sL) + sum(solver.Value(v) for v in sU))
     warn_list = []
     if total_slack > 0:
@@ -243,9 +274,21 @@ with st.sidebar:
     st.header("설정")
     uploaded = st.file_uploader("엑셀 업로드 (.xlsx)", type=["xlsx"])
     time_limit = st.slider("해결 시간 제한(초)", min_value=5, max_value=30, value=10, step=1)
+    MAX_PER_CHURCH = 4  # 분포 분석 결과: 팀당 동일 교회 최대 4명 필요
     run_btn = st.button("🎲 매칭 시작")
 
-st.markdown("필수 컬럼: `이름`, `성별(남/여)`, `교회 이름`, `나이` &nbsp;&nbsp;·&nbsp;&nbsp; 결과는 **팀 번호 + 이름(가나다순, `/` 구분)** 만 표시됩니다.", unsafe_allow_html=True)
+# 글자 크기 조절(조화롭게)
+title_px = st.sidebar.slider("제목 글자 크기(px)", 48, 96, 64, 2)
+names_px = st.sidebar.slider("이름 글자 크기(px)", 24, 64, 36, 2)
+st.markdown(f"""
+<style>
+.team-title {{text-align:center; font-size: {title_px}px; font-weight: 800; margin: 24px 0 8px 0;}}
+.names-line {{text-align:center; font-size: {names_px}px; line-height: 1.8;}}
+</style>
+""", unsafe_allow_html=True)
+
+
+st.markdown("필수 컬럼: `이름`, `성별(남/여)`, `교회 이름`, `나이` · 결과는 **팀 번호 + 이름(가나다순, `/` 구분)** 만 표시됩니다.", unsafe_allow_html=True)
 
 df = None
 if uploaded is not None:
@@ -283,13 +326,12 @@ if df is not None:
         st.warning(warn)
 
     if run_btn:
-        # 진행 애니메이션
         ph = st.empty()
         for pct in range(0, 101, 7):
             ph.progress(pct, text="배치 탐색 중...")
             time.sleep(0.03)
 
-        groups, warn_list, err, sizes = solve_assignment(df, time_limit=time_limit)
+        groups, warn_list, err, sizes = solve_assignment(df, time_limit=time_limit, max_per_church=MAX_PER_CHURCH)
 
         if err:
             st.error(err)
@@ -312,31 +354,40 @@ if df is not None:
         st.session_state.names_per_team = names_per_team
         st.session_state.team_count = len(names_per_team)
         st.session_state.team_idx = 0
+        st.session_state.final_view = False
 
-# Sequential viewer (only if ready)
+# Viewer
 if st.session_state.get("assignment_ready", False):
-    ctop = st.container()
-    with ctop:
-        st.markdown("<div class='navbar'>", unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
-            if st.button("◀ 이전 팀"):
-                st.session_state.team_idx = (st.session_state.team_idx - 1) % st.session_state.team_count
-        with c2:
-            st.markdown(f"<span class='badge'>{st.session_state.team_idx+1} / {st.session_state.team_count}팀</span>", unsafe_allow_html=True)
-        with c3:
-            if st.button("다음 팀 ▶"):
-                st.session_state.team_idx = (st.session_state.team_idx + 1) % st.session_state.team_count
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='navbar'>", unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns([1,1,1,1])
+    with c1:
+        if st.button("◀ 이전 팀"):
+            st.session_state.team_idx = (st.session_state.team_idx - 1) % st.session_state.team_count
+            st.session_state.final_view = False
+    with c2:
+        if st.button("최종 결과 보기"):
+            st.session_state.final_view = True
+    with c3:
+        st.markdown(f"<span class='badge'>{st.session_state.team_idx+1} / {st.session_state.team_count}팀</span>", unsafe_allow_html=True)
+    with c4:
+        if st.button("다음 팀 ▶"):
+            if st.session_state.team_idx < st.session_state.team_count - 1:
+                st.session_state.team_idx += 1
+                st.session_state.final_view = False
+            else:
+                st.session_state.final_view = True
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    cur_idx = st.session_state.team_idx
-    team_number = cur_idx + 1
-    names_line = st.session_state.names_per_team[cur_idx]
+    if st.session_state.final_view:
+        st.markdown("<div class='team-title'>최종 결과</div>", unsafe_allow_html=True)
+        for g, names_line_tmp in enumerate(st.session_state.names_per_team, start=1):
+            st.markdown(f"<div class='names-line'><b>팀 {g}</b> — {names_line_tmp}</div>", unsafe_allow_html=True)
+    else:
+        cur_idx = st.session_state.team_idx
+        st.markdown(f"<div class='team-title'>팀 {cur_idx+1}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='names-line'>{st.session_state.names_per_team[cur_idx]}</div>", unsafe_allow_html=True)
 
-    st.markdown(f"<div class='team-title'>팀 {team_number}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='names-line'>{names_line}</div>", unsafe_allow_html=True)
-
-    # Download button (full assignment)
+    # Download
     rows = []
     for g, names_line_tmp in enumerate(st.session_state.names_per_team):
         for name in names_line_tmp.split(" / "):
